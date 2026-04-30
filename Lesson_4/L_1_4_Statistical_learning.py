@@ -3,9 +3,7 @@
 '''
 
 Статистичне навчання:
- - визначення параметрів поліноміальної / експоненційної моделі за статистичною дискретною навчальною вибіркою;
- - побудова лінії тренду;
- - прогнозування динаміки розвитку статистичного ряду.
+ - побудова лінії тренду (траекторії руху) динамічного об'екту / процесу за рекурентним алгоритмом.
 
 Склад етапів:
 1. Тестова аддитивна модель: квадратичний тренд + нормальна + аномальна помилки;
@@ -13,7 +11,8 @@
 3. Визначення статистичних характеристик навчальної вибірки;
 4. Детекція та очищення навчальної вибірки від аномалій;
 5. Статистичне навчання парамерів поліноміальної моделі за МНК - бібліотека numpy;
-6. Прогнозування динаміки розвитку статистичного ряду за МНК.
+6. Статистичне навчання парамерів поліноміальної моделі за рекурентним скалярним фільтром Калмана (альфа-бетта фільтр) - бібліотека numpy;
+
 
 Package                      Version
 ---------------------------- -----------
@@ -28,7 +27,6 @@ matplotlib                   3.6.2
 '''
 
 import sys
-import time
 import numpy as np
 import math as mt
 import matplotlib.pyplot as plt
@@ -129,6 +127,25 @@ def r2_score(SL, Yout, Text):
 
     return R2_score_our
 
+# ----- Коефіцієнт детермінації - оцінювання якості моделі --------
+def r2_score_expo(SL, Yout, Text):
+    # статистичні характеристики вибірки з урахуванням тренду
+    iter = len(Yout)
+    numerator = 0
+    denominator_1 = 0
+    for i in range(iter):
+        numerator = numerator + (SL[i] - Yout[i]) ** 2
+        denominator_1 = denominator_1 + SL[i]
+    denominator_2 =  0
+    for i in range(iter):
+        denominator_2 = denominator_2 + (SL[i] - (denominator_1 / iter)) ** 2
+    R2_score_our = 1 - (numerator / denominator_2)
+    print('------------', Text, '-------------')
+    print('кількість елементів вбірки=', iter)
+    print('Коефіцієнт детермінації (ймовірність апроксимації)=', R2_score_our)
+
+    return R2_score_our
+
 # ----- статистичні характеристики вхідної вибірки  --------
 def Stat_characteristics_in (SL, Text):
     # статистичні характеристики вибірки з урахуванням тренду
@@ -173,30 +190,7 @@ def Stat_characteristics_out (SL_in, SL, Text):
     print('-----------------------------------------------------')
     return
 
-# ----- статистичні характеристики екстраполяції  --------
-def Stat_characteristics_extrapol (koef, SL, Text):
-    # статистичні характеристики вибірки з урахуванням тренду
-    Yout = MNK_Stat_characteristics(SL)
-    iter = len(Yout)
-    SL0 = np.zeros((iter ))
-    for i in range(iter):
-        SL0[i] = SL[i,0] - Yout[i, 0]
-    mS = np.median(SL0)
-    dS = np.var(SL0)
-    scvS = mt.sqrt(dS)
-    #  довірчий інтервал прогнозованих значень за СКВ
-    scvS_extrapol = scvS * koef
-    print('------------', Text ,'-------------')
-    print('кількість елементів ивбірки=', iter)
-    print('матиматичне сподівання ВВ=', mS)
-    print('дисперсія ВВ =', dS)
-    print('СКВ ВВ=', scvS)
-    print('Довірчий інтервал прогнозованих значень за СКВ=', scvS_extrapol)
-    print('-----------------------------------------------------')
-    return
-
-
-# ------------- МНК згладжуваннядля визначення стат. характеристик -------------
+# ------------- МНК згладжування для визначення стат. характеристик -------------
 def MNK_Stat_characteristics (S0):
     iter = len(S0)
     Yin = np.zeros((iter, 1))
@@ -257,79 +251,31 @@ def MNK_AV_Detect (S0):
     C=FFTIFT.dot(Yin)
     return C[1,0]
 
-# ---------------------------  МНК ПРОГНОЗУВАННЯ -------------------------------
-def MNK_Extrapol (S0, koef):
+
+# ------------------------- алгоритм -а-b фільтрa ------------------------
+def ABF (S0):
     iter = len(S0)
-    Yout_Extrapol = np.zeros((iter+koef, 1))
     Yin = np.zeros((iter, 1))
-    F = np.ones((iter, 3))
-    for i in range(iter):  # формування структури вхідних матриць МНК
-        Yin[i, 0] = float(S0[i])  # формування матриці вхідних даних
-        F[i, 1] = float(i)
-        F[i, 2] = float(i * i)
-    FT=F.T
-    FFT = FT.dot(F)
-    FFTI=np.linalg.inv(FFT)
-    FFTIFT=FFTI.dot(FT)
-    C=FFTIFT.dot(Yin)
-    print('Регресійна модель:')
-    print('y(t) = ', C[0, 0], ' + ', C[1, 0], ' * t', ' + ', C[2, 0], ' * t^2')
-    for i in range(iter+koef):
-        Yout_Extrapol[i, 0] = C[0, 0]+C[1, 0]*i+(C[2, 0]*i*i)   # проліноміальна крива МНК - прогнозування
-    return Yout_Extrapol
+    YoutAB = np.zeros((iter, 1))
+    T0=1
+    for i in range(iter):
+        Yin[i, 0] = float(S0[i])
+    # -------------- початкові дані для запуску фільтра
+    Yspeed_retro=(Yin[1, 0]-Yin[0, 0])/T0
+    Yextra=Yin[0, 0]+Yspeed_retro
+    alfa=2*(2*1-1)/(1*(1+1))
+    beta=(6/1)*(1+1)
+    YoutAB[0, 0]=Yin[0, 0]+alfa*(Yin[0, 0])
+    # -------------- рекурентний прохід по вимірам
+    for i in range(1, iter):
+        YoutAB[i,0]=Yextra+alfa*(Yin[i, 0]- Yextra)
+        Yspeed=Yspeed_retro+(beta/T0)*(Yin[i, 0]- Yextra)
+        Yspeed_retro = Yspeed
+        Yextra = YoutAB[i,0] + Yspeed_retro
+        alfa = (2 * (2 * i - 1)) / (i * (i + 1))
+        beta = 6 /(i* (i + 1))
+    return YoutAB
 
-# ------------------------------ Виявлення АВ за алгоритмом medium -------------------------------------
-def Sliding_Window_AV_Detect_medium (S0, n_Wind, Q):
-    # ---- параметри циклів ----
-    iter = len(S0)
-    j_Wind=mt.ceil(iter-n_Wind)+1
-    S0_Wind=np.zeros((n_Wind))
-    # -------- еталон  ---------
-    j=0
-    for i in range(n_Wind):
-        l = (j + i)
-        S0_Wind[i] = S0[l]
-        dS_standart = np.var(S0_Wind)
-        scvS_standart = mt.sqrt(dS_standart)
-    # ---- ковзне вікно ---------
-    for j in range(j_Wind):
-        for i in range(n_Wind):
-            l=(j+i)
-            S0_Wind[i] = S0[l]
-    # - Стат хар ковзного вікна --
-        mS = np.median(S0_Wind)
-        dS = np.var(S0_Wind)
-        scvS = mt.sqrt(dS)
-    # --- детекція та заміна АВ --
-        if scvS  > (Q*scvS_standart):
-            # детектор виявлення АВ
-            S0[l]=mS
-    return S0
-
-# ------------------------------ Виявлення АВ за МНК -------------------------------------
-def Sliding_Window_AV_Detect_MNK (S0, Q, n_Wind):
-    # ---- параметри циклів ----
-    iter = len(S0)
-    j_Wind=mt.ceil(iter-n_Wind)+1
-    S0_Wind=np.zeros((n_Wind))
-    # -------- еталон  ---------
-    Speed_standart = MNK_AV_Detect(SV_AV)
-    Yout_S0 = MNK(SV_AV)
-    # ---- ковзне вікно ---------
-    for j in range(j_Wind):
-        for i in range(n_Wind):
-            l=(j+i)
-            S0_Wind[i] = S0[l]
-    # - Стат хар ковзного вікна --
-        dS = np.var(S0_Wind)
-        scvS = mt.sqrt(dS)
-    # --- детекція та заміна АВ --
-        Speed_standart_1 = abs(Speed_standart * mt.sqrt(iter))
-        Speed_1 = abs(Q * Speed_standart * mt.sqrt(n_Wind) * scvS)
-        if Speed_1  > Speed_standart_1:
-            # детектор виявлення АВ
-            S0[l]=Yout_S0[l,0]
-    return S0
 
 # ------------------------------ Виявлення АВ за алгоритмом sliding window -------------------------------------
 def Sliding_Window_AV_Detect_sliding_wind (S0, n_Wind):
@@ -368,12 +314,12 @@ if __name__ == '__main__':
     if (Data_mode == 1):
         # ------------------------------ сегмент констант ---------------------------
         n = 10000
-        iter = int(n)   # кількість реалізацій ВВ
-        Q_AV = 3        # коефіцієнт переваги АВ
+        iter = int(n)  # кількість реалізацій ВВ
+        Q_AV = 3  # коефіцієнт переваги АВ
         nAVv = 10
         nAV = int((iter * nAVv) / 100)  # кількість АВ у відсотках та абсолютних одиницях
         dm = 0
-        dsig = 5         # параметри нормального закону розподілу ВВ: середне та СКВ
+        dsig = 5  # параметри нормального закону розподілу ВВ: середне та СКВ
 
         # ------------------------------ сегмент даних ---------------------------
         # ------------ виклики функцій моделей: тренд, аномального та нормального шуму  ----------
@@ -403,70 +349,38 @@ if __name__ == '__main__':
 
     if (Data_mode == 3):
         print('Бібліотеки Python для реалізації методів статистичного навчання:')
-        print('https://numpy.org/doc/stable/reference/generated/numpy.polyfit.html')
-        print('https://www.statsmodels.org/stable/examples/notebooks/generated/ols.html')
-        print('https://scikit-learn.org/stable/modules/sgd.html#regression')
+        print('https://filterpy.readthedocs.io/en/latest/index.html#')
+        print('https://unit8co.github.io/darts/generated_api/darts.models.filtering.kalman_filter.html')
         sys.exit(0)
 
 
     # ------------------- вибір функціоналу статистичного навчання -----------------------
 
     print('Оберіть функціонал процесів навчання:')
-    print('1 - детекція та очищення від АВ: метод medium')
-    print('2 - детекція та очищення від АВ: метод MNK')
-    print('3 - детекція та очищення від АВ: метод sliding window')
-    print('4 - МНК згладжування')
-    print('5 - МНК прогнозування')
+    print('1 - AB фільтрація')
+    print('2 - МНК згладжування')
     mode = int(input('mode:'))
 
     if (mode == 1):
-        print('Вибірка очищена від АВ метод medium')
-        # --------- Увага!!! якість результату залежить від якості еталонного вікна -----------
-        N_Wind_Av = 5                           # розмір ковзного вікна для виявлення АВ
-        Q = 1.6                                 # коефіцієнт виявлення АВ
-        StartTime = time.time()                 # фіксація часу початку обчислень
-        S_AV_Detect_medium = Sliding_Window_AV_Detect_medium(SV_AV, N_Wind_Av, Q)
-        totalTime = (time.time() - StartTime)   # фіксація часу, на очищення від АВ
-        print('totalTime =', totalTime, 's')
-        Stat_characteristics_in(S_AV_Detect_medium, 'Вибірка очищена від алгоритм medium АВ')
-        Yout_SV_AV_Detect = MNK(S_AV_Detect_medium)
-        Stat_characteristics_out(SV_AV, Yout_SV_AV_Detect, 'МНК Вибірка відчищена від АВ алгоритм medium')
-        Plot_AV(S0, S_AV_Detect_medium, 'Вибірка очищена від АВ алгоритм medium')
-
-    if (mode == 2):
-        print('Вибірка очищена від АВ метод MNK')
-        # ------------------- Очищення від аномальних похибок МНК --------------------------
-        n_Wind = 5  # розмір ковзного вікна для виявлення АВ
-        Q_MNK = 7  # коефіцієнт виявлення АВ
-        StartTime = time.time()                 # фіксація часу початку обчислень
-        S_AV_Detect_MNK = Sliding_Window_AV_Detect_MNK(SV_AV, Q_MNK, n_Wind)
-        totalTime = (time.time() - StartTime)   # фіксація часу, на очищення від АВ
-        print('totalTime =', totalTime, 's')
-        Stat_characteristics_in(S_AV_Detect_MNK, 'Вибірка очищена від АВ алгоритм MNK')
-        Yout_SV_AV_Detect_MNK = MNK(S_AV_Detect_MNK)
-        Stat_characteristics_out(SV_AV, Yout_SV_AV_Detect_MNK, 'МНК Вибірка очищена від АВ алгоритм MNK')
-        Plot_AV(S0, S_AV_Detect_MNK, 'Вибірка очищена від АВ алгоритм MNK')
-
-    if (mode == 3):
-        print('Вибірка очищена від АВ метод sliding_wind')
+        print('ABF згладжена вибірка очищена від АВ алгоритм sliding_wind')
         # --------------- Очищення від аномальних похибок sliding window -------------------
         n_Wind = 5  # розмір ковзного вікна для виявлення АВ
-        StartTime = time.time()                 # фіксація часу початку обчислень
         S_AV_Detect_sliding_wind = Sliding_Window_AV_Detect_sliding_wind(SV_AV, n_Wind)
-        totalTime = (time.time() - StartTime)   # фіксація часу, на очищення від АВ
-        print('totalTime =', totalTime, 's')
         Stat_characteristics_in(S_AV_Detect_sliding_wind, 'Вибірка очищена від АВ алгоритм sliding_wind')
-        Yout_SV_AV_Detect_sliding_wind = MNK(S_AV_Detect_sliding_wind)
-        Stat_characteristics_out(SV_AV, Yout_SV_AV_Detect_sliding_wind, 'МНК Вибірка очищена від АВ алгоритм sliding_wind')
-        Plot_AV(S0, S_AV_Detect_sliding_wind, 'Вибірка очищена від АВ алгоритм sliding_wind')
+        Yout_SV_AV_Detect_sliding_wind = ABF(S_AV_Detect_sliding_wind)
+        Stat_characteristics_out(SV_AV, Yout_SV_AV_Detect_sliding_wind,
+                             'ABF згладжена, вибірка очищена від АВ алгоритм sliding_wind')
+        # --------------- Оцінювання якості моделі та візуалізація -------------------------
+        r2_score(S_AV_Detect_sliding_wind, Yout_SV_AV_Detect_sliding_wind, 'ABF_модель_згладжування')
+        Plot_AV(Yout_SV_AV_Detect_sliding_wind, S_AV_Detect_sliding_wind,
+                'ABF Вибірка очищена від АВ алгоритм sliding_wind')
 
-    if (mode == 4):
+    if (mode == 2):
         print('MNK згладжена вибірка очищена від АВ алгоритм sliding_wind')
         # --------------- Очищення від аномальних похибок sliding window -------------------
         n_Wind = 5  # розмір ковзного вікна для виявлення АВ
         S_AV_Detect_sliding_wind = Sliding_Window_AV_Detect_sliding_wind(SV_AV, n_Wind)
         Stat_characteristics_in(S_AV_Detect_sliding_wind, 'Вибірка очищена від АВ алгоритм sliding_wind')
-        # Yout_SV_AV_Detect_sliding_wind = MNK(SV_AV)
         Yout_SV_AV_Detect_sliding_wind = MNK(S_AV_Detect_sliding_wind)
         Stat_characteristics_out(SV_AV, Yout_SV_AV_Detect_sliding_wind,
                              'MNK згладжена, вибірка очищена від АВ алгоритм sliding_wind')
@@ -474,17 +388,3 @@ if __name__ == '__main__':
         r2_score(S_AV_Detect_sliding_wind, Yout_SV_AV_Detect_sliding_wind, 'MNK_модель_згладжування')
         Plot_AV(Yout_SV_AV_Detect_sliding_wind, S_AV_Detect_sliding_wind,
                 'MNK Вибірка очищена від АВ алгоритм sliding_wind')
-
-    if (mode == 5):
-        print('MNK ПРОГНОЗУВАННЯ')
-        # --------------- Очищення від аномальних похибок sliding window -------------------
-        n_Wind = 5  # розмір ковзного вікна для виявлення АВ
-        koef_Extrapol = 0.5  # коефіціент прогнозування: співвідношення інтервалу спостереження до  інтервалу прогнозування
-        koef = mt.ceil(n * koef_Extrapol)  # інтервал прогнозу по кількісті вимірів статистичної вибірки
-        S_AV_Detect_sliding_wind = Sliding_Window_AV_Detect_sliding_wind(SV_AV, n_Wind)
-        Stat_characteristics_in(S_AV_Detect_sliding_wind, 'Вибірка очищена від АВ алгоритм sliding_wind')
-        Yout_SV_AV_Detect_sliding_wind = MNK_Extrapol(S_AV_Detect_sliding_wind, koef)
-        Stat_characteristics_extrapol(koef, Yout_SV_AV_Detect_sliding_wind,
-                             'MNK ПРОГНОЗУВАННЯ, вибірка очищена від АВ алгоритм sliding_wind')
-        Plot_AV(Yout_SV_AV_Detect_sliding_wind, S_AV_Detect_sliding_wind,
-                'MNK ПРОГНОЗУВАННЯ: Вибірка очищена від АВ алгоритм sliding_wind')

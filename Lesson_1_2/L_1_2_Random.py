@@ -50,7 +50,7 @@ def random_uniform (a, b, iter):
 
 # ------------------------- нормальний закон розводілу ВВ ----------------------------
 def rando_norm (dm, dsig, iter):
-    S = ((np.random.normal(dm, dsig, iter))*1)+0  # нормальний закон розподілу ВВ з вибіркою єб'ємом iter та параметрами: dm, dsig
+    S = ((np.random.normal(dm, dsig, iter))*13)+0  # нормальний закон розподілу ВВ з вибіркою єб'ємом iter та параметрами: dm, dsig
     mS = np.median(S)
     dS = np.var(S)
     scvS = mt.sqrt(dS)
